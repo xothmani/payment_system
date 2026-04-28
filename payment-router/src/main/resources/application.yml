@@ -1,0 +1,21 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: payment-router
+
+payment:
+  authorize-net:
+    url: ${AUTHORIZE_NET_SERVICE_URL}
+  paddle:
+    url: ${PADDLE_SERVICE_URL}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
