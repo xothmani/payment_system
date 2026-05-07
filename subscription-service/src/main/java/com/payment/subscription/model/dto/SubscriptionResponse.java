@@ -14,6 +14,7 @@ public record SubscriptionResponse(
         LocalDateTime trialEndsAt,
         LocalDateTime currentPeriodEnd,
         long daysRemaining,
-        long tokenBalance
+        long tokenBalance,
+        String checkoutUrl
 ) {
 }

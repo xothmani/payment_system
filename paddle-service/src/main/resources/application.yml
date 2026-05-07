@@ -14,6 +14,13 @@ spring:
 paddle:
   api-key: ${PADDLE_API_KEY}
   webhook-secret: ${PADDLE_WEBHOOK_SECRET}
+  base-url: https://sandbox-api.paddle.com
+  success-url: ${PADDLE_SUCCESS_URL:http://localhost:3000/payment/success}
+  cancel-url: ${PADDLE_CANCEL_URL:http://localhost:3000/payment/cancel}
+
+subscription:
+  service:
+    url: ${SUBSCRIPTION_SERVICE_URL}
 
 management:
   endpoints:

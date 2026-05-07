@@ -7,50 +7,46 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "plans")
+@Table(name = "outbox_events")
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class Plan {
+public class OutboxEvent {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(unique = true, nullable = false)
-    private String code;
+    @Column(nullable = false)
+    private String aggregateType;
 
     @Column(nullable = false)
-    private String name;
-
-    @Column(precision = 10, scale = 2)
-    private BigDecimal priceMonthly;
-
-    @Column(precision = 10, scale = 2)
-    private BigDecimal priceAnnual;
+    private UUID aggregateId;
 
     @Column(nullable = false)
-    private boolean aiEnabled;
+    private String eventType;
 
-    private int maxSurveysPerMonth;
+    @Column(columnDefinition = "TEXT", nullable = false)
+    private String payload;
 
-    private long tokenAllowance;
-
-    private int trialDays;
-
-    @Column(name = "paddle_price_id")
-    private String paddlePriceId;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private OutboxStatus status;
 
     @Builder.Default
-    private boolean active = true;
+    private int retryCount = 0;
 
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;
+
+    private LocalDateTime processedAt;
+
+    @Column(columnDefinition = "TEXT")
+    private String lastError;
 }

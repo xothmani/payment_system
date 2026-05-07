@@ -16,4 +16,6 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
     Optional<Subscription> findByUserId(UUID userId);
 
     List<Subscription> findByStatusAndTrialEndsAtLessThanEqual(SubscriptionStatus status, LocalDateTime date);
+
+    Optional<Subscription> findByPaddleSubscriptionId(String paddleSubscriptionId);
 }

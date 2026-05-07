@@ -12,11 +12,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestClient;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -28,11 +29,14 @@ public class SubscriptionService {
     private final PlanRepository planRepository;
     private final TokenLedgerRepository tokenLedgerRepository;
     private final TokenLedgerService tokenLedgerService;
+    private final OutboxService outboxService;
+    private final RateLimitService rateLimitService;
     private final RedisTemplate<String, String> redisTemplate;
-    private final RestClient paymentRouterRestClient;
 
     @Transactional
     public CreateSubscriptionResponse createSubscription(CreateSubscriptionRequest request) {
+        rateLimitService.checkSubscriptionRateLimit(request.userId());
+
         subscriptionRepository.findByUserId(request.userId())
                 .filter(s -> s.getStatus() == SubscriptionStatus.ACTIVE
                         || s.getStatus() == SubscriptionStatus.TRIAL)
@@ -50,53 +54,42 @@ public class SubscriptionService {
                     .orElseThrow(() -> new PlanNotFoundException(request.planId()));
         }
 
-        String customerProfileId = null;
-        String paymentProfileId = null;
-
-        record ProfileRouteReq(String userId, String country, String email,
-                               String cardNumber, String expirationDate, String cardCode) {}
-        record ProfileRouteRes(String customerProfileId, String paymentProfileId,
-                               String paddleSubscriptionId) {}
-
-        try {
-            ProfileRouteRes routerRes = paymentRouterRestClient
-                    .post()
-                    .uri("/profiles")
-                    .body(new ProfileRouteReq(
-                            request.userId().toString(), request.country(), request.email(),
-                            request.cardNumber(), request.expirationDate(), request.cardCode()))
-                    .retrieve()
-                    .body(ProfileRouteRes.class);
-
-            if (routerRes != null) {
-                customerProfileId = routerRes.customerProfileId();
-                paymentProfileId = routerRes.paymentProfileId();
-            }
-        } catch (Exception e) {
-            log.error("Failed to route profile creation for userId={}: {}", request.userId(), e.getMessage(), e);
-            throw new PaymentException("Failed to create payment profile: " + e.getMessage(), e);
-        }
-
         LocalDateTime now = LocalDateTime.now();
-        String cardLast4 = request.cardNumber().substring(request.cardNumber().length() - 4);
+        boolean isUs = "US".equalsIgnoreCase(request.country());
+
+        String cardLast4 = isUs
+                ? request.cardNumber().substring(request.cardNumber().length() - 4)
+                : null;
+        String cardExpiry = isUs ? request.expirationDate() : null;
 
         Subscription subscription = Subscription.builder()
                 .userId(request.userId())
                 .plan(plan)
-                .status(SubscriptionStatus.TRIAL)
+                .status(isUs ? SubscriptionStatus.TRIAL : SubscriptionStatus.PENDING)
                 .billingInterval(request.billingInterval())
-                .trialStartedAt(now)
-                .trialEndsAt(now.plusDays(plan.getTrialDays()))
-                .currentPeriodStart(now)
-                .currentPeriodEnd(now.plusDays(plan.getTrialDays()))
-                .customerProfileId(customerProfileId)
-                .paymentProfileId(paymentProfileId)
+                .trialStartedAt(isUs ? now : null)
+                .trialEndsAt(isUs ? now.plusDays(plan.getTrialDays()) : null)
+                .currentPeriodStart(isUs ? now : null)
+                .currentPeriodEnd(isUs ? now.plusDays(plan.getTrialDays()) : null)
                 .country(request.country())
                 .cardLast4(cardLast4)
-                .cardExpiry(request.expirationDate())
+                .cardExpiry(cardExpiry)
                 .build();
 
         subscription = subscriptionRepository.save(subscription);
+
+        // Build gateway payload, then synchronously create profile (US) or Paddle checkout (non-US).
+        // The checkoutUrl is returned in the response so the frontend can redirect immediately.
+        Map<String, Object> gatewayPayload = new HashMap<>();
+        gatewayPayload.put("userId", request.userId().toString());
+        gatewayPayload.put("country", request.country());
+        gatewayPayload.put("email", request.email());
+        gatewayPayload.put("cardNumber", isUs ? request.cardNumber() : null);
+        gatewayPayload.put("expirationDate", isUs ? request.expirationDate() : null);
+        gatewayPayload.put("cardCode", isUs ? request.cardCode() : null);
+        gatewayPayload.put("priceId", isUs ? null : plan.getPaddlePriceId());
+
+        String checkoutUrl = outboxService.createCheckoutSync(subscription.getId(), gatewayPayload);
 
         if (plan.getTokenAllowance() > 0) {
             tokenLedgerRepository.save(TokenLedger.builder()
@@ -106,7 +99,6 @@ public class SubscriptionService {
                     .balanceAfter(plan.getTokenAllowance())
                     .description("Plan allocation - " + plan.getCode())
                     .build());
-
             redisTemplate.opsForValue().set(
                     RedisKeys.tokenBalance(request.userId().toString()),
                     String.valueOf(plan.getTokenAllowance()));
@@ -116,7 +108,8 @@ public class SubscriptionService {
                 subscription.getId(),
                 subscription.getStatus(),
                 subscription.getTrialEndsAt(),
-                plan.getTokenAllowance());
+                plan.getTokenAllowance(),
+                checkoutUrl);
     }
 
     @Transactional(readOnly = true)
@@ -125,9 +118,12 @@ public class SubscriptionService {
                 .orElseThrow(() -> new SubscriptionNotFoundException(subscriptionId));
 
         LocalDateTime now = LocalDateTime.now();
-        long daysRemaining = subscription.getStatus() == SubscriptionStatus.TRIAL
-                ? ChronoUnit.DAYS.between(now, subscription.getTrialEndsAt())
-                : ChronoUnit.DAYS.between(now, subscription.getCurrentPeriodEnd());
+        long daysRemaining = 0;
+        if (subscription.getStatus() == SubscriptionStatus.TRIAL && subscription.getTrialEndsAt() != null) {
+            daysRemaining = ChronoUnit.DAYS.between(now, subscription.getTrialEndsAt());
+        } else if (subscription.getCurrentPeriodEnd() != null) {
+            daysRemaining = ChronoUnit.DAYS.between(now, subscription.getCurrentPeriodEnd());
+        }
 
         long tokenBalance = getTokenBalance(subscription.getUserId());
 
@@ -139,7 +135,8 @@ public class SubscriptionService {
                 subscription.getTrialEndsAt(),
                 subscription.getCurrentPeriodEnd(),
                 daysRemaining,
-                tokenBalance);
+                tokenBalance,
+                subscription.getPaddleCheckoutUrl());
     }
 
     @Transactional
@@ -151,24 +148,19 @@ public class SubscriptionService {
             throw new AlreadyCancelledException(subscriptionId);
         }
 
-        if (subscription.getCustomerProfileId() != null) {
-            try {
-                paymentRouterRestClient
-                        .delete()
-                        .uri("/profiles/{id}?country={country}",
-                                subscription.getCustomerProfileId(),
-                                subscription.getCountry())
-                        .retrieve()
-                        .toBodilessEntity();
-            } catch (Exception e) {
-                log.error("Failed to route profile deletion for subscription={}: {}",
-                        subscriptionId, e.getMessage(), e);
-            }
-        }
-
         subscription.setStatus(SubscriptionStatus.CANCELLED);
         subscription.setCancelledAt(LocalDateTime.now());
         subscriptionRepository.save(subscription);
+
+        String profileId = subscription.getCustomerProfileId() != null
+                ? subscription.getCustomerProfileId()
+                : subscription.getPaddleSubscriptionId();
+
+        if (profileId != null) {
+            outboxService.saveEvent("SUBSCRIPTION", subscription.getId(),
+                    "SUBSCRIPTION_CANCELLED",
+                    new CancelProfileRequest(profileId, subscription.getCountry()));
+        }
 
         return new CancelSubscriptionResponse(
                 subscription.getId(),
@@ -194,6 +186,31 @@ public class SubscriptionService {
         tokenLedgerService.logDebitAsync(userId, amount, newBalance, description);
 
         return new TokenDeductionResponse(userId, amount, newBalance);
+    }
+
+    @Transactional
+    public void updateStatusByPaddleSubscriptionId(String paddleSubscriptionId, String status) {
+        Subscription subscription = subscriptionRepository.findByPaddleSubscriptionId(paddleSubscriptionId)
+                .orElseThrow(() -> new SubscriptionNotFoundException(
+                        UUID.fromString("00000000-0000-0000-0000-000000000000")));
+
+        SubscriptionStatus newStatus;
+        try {
+            newStatus = SubscriptionStatus.valueOf(status.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Unknown subscription status: " + status);
+        }
+
+        subscription.setStatus(newStatus);
+        if (newStatus == SubscriptionStatus.ACTIVE) {
+            LocalDateTime now = LocalDateTime.now();
+            subscription.setCurrentPeriodStart(now);
+            subscription.setCurrentPeriodEnd(now.plusDays(30));
+        } else if (newStatus == SubscriptionStatus.CANCELLED) {
+            subscription.setCancelledAt(LocalDateTime.now());
+        }
+        subscriptionRepository.save(subscription);
+        log.info("Subscription {} (paddle={}) status updated to {}", subscription.getId(), paddleSubscriptionId, newStatus);
     }
 
     private long getTokenBalance(UUID userId) {

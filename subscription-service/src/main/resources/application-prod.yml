@@ -1,0 +1,6 @@
+paddle:
+  prices:
+    individual-monthly: ${PADDLE_PRICE_INDIVIDUAL_MONTHLY}
+    individual-annual: ${PADDLE_PRICE_INDIVIDUAL_ANNUAL}
+    individual-ai-monthly: ${PADDLE_PRICE_INDIVIDUAL_AI_MONTHLY}
+    individual-ai-annual: ${PADDLE_PRICE_INDIVIDUAL_AI_ANNUAL}
