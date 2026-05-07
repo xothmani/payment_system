@@ -113,6 +113,18 @@ public class SubscriptionService {
     }
 
     @Transactional(readOnly = true)
+    public List<PlanResponse> getActivePlans() {
+        return planRepository.findByActiveTrue().stream()
+                .map(p -> new PlanResponse(
+                        p.getId(), p.getCode(), p.getName(),
+                        p.getPriceMonthly(), p.getPriceAnnual(),
+                        p.isAiEnabled(), p.getMaxSurveysPerMonth(),
+                        p.getTokenAllowance(), p.getTrialDays(),
+                        p.getPaddlePriceId()))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
     public SubscriptionResponse getSubscription(UUID subscriptionId) {
         Subscription subscription = subscriptionRepository.findById(subscriptionId)
                 .orElseThrow(() -> new SubscriptionNotFoundException(subscriptionId));

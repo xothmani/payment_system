@@ -3,6 +3,7 @@ package com.payment.subscription.controller;
 import com.payment.subscription.model.dto.CancelSubscriptionResponse;
 import com.payment.subscription.model.dto.CreateSubscriptionRequest;
 import com.payment.subscription.model.dto.CreateSubscriptionResponse;
+import com.payment.subscription.model.dto.PlanResponse;
 import com.payment.subscription.model.dto.SubscriptionResponse;
 import com.payment.subscription.service.SubscriptionService;
 import jakarta.validation.Valid;
@@ -11,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -20,6 +22,11 @@ import java.util.UUID;
 public class SubscriptionController {
 
     private final SubscriptionService subscriptionService;
+
+    @GetMapping("/plans")
+    public List<PlanResponse> getActivePlans() {
+        return subscriptionService.getActivePlans();
+    }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
