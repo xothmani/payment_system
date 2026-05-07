@@ -1,5 +1,6 @@
-package com.payment.subscription.config;
+package com.payment.paddle.config;
 
+import lombok.RequiredArgsConstructor;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -7,20 +8,21 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestClient;
 
 @Configuration
-public class RestClientConfig {
+@RequiredArgsConstructor
+public class PaddleRestClientConfig {
 
     private static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
 
-    @Value("${payment.router.url}")
-    private String paymentRouterUrl;
+    private final PaddleConfig paddleConfig;
 
-    @Value("${paddle.service.url}")
-    private String paddleServiceUrl;
+    @Value("${subscription.service.url}")
+    private String subscriptionServiceUrl;
 
-    @Bean("paymentRouterRestClient")
-    public RestClient paymentRouterRestClient() {
+    @Bean("paddleApiClient")
+    public RestClient paddleApiClient() {
         return RestClient.builder()
-                .baseUrl(paymentRouterUrl)
+                .baseUrl(paddleConfig.getBaseUrl())
+                .defaultHeader("Authorization", "Bearer " + paddleConfig.getApiKey())
                 .requestInterceptor((request, body, execution) -> {
                     String correlationId = MDC.get("correlationId");
                     if (correlationId != null) {
@@ -31,10 +33,10 @@ public class RestClientConfig {
                 .build();
     }
 
-    @Bean("paddleServiceRestClient")
-    public RestClient paddleServiceRestClient() {
+    @Bean("subscriptionServiceRestClient")
+    public RestClient subscriptionServiceRestClient() {
         return RestClient.builder()
-                .baseUrl(paddleServiceUrl)
+                .baseUrl(subscriptionServiceUrl)
                 .requestInterceptor((request, body, execution) -> {
                     String correlationId = MDC.get("correlationId");
                     if (correlationId != null) {

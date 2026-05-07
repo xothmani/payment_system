@@ -1,5 +1,5 @@
 package com.payment.subscription.model;
 
 public enum SubscriptionStatus {
-    TRIAL, ACTIVE, CANCELLED, EXPIRED, PAST_DUE
+    PENDING, TRIAL, ACTIVE, CANCELLED, EXPIRED, PAST_DUE
 }

@@ -8,8 +8,10 @@ import com.payment.subscription.service.SubscriptionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -34,5 +36,13 @@ public class SubscriptionController {
     @DeleteMapping("/{id}")
     public CancelSubscriptionResponse cancelSubscription(@PathVariable UUID id) {
         return subscriptionService.cancelSubscription(id);
+    }
+
+    @PutMapping("/paddle/{paddleSubscriptionId}/status")
+    public ResponseEntity<Void> updatePaddleStatus(
+            @PathVariable String paddleSubscriptionId,
+            @RequestBody Map<String, String> body) {
+        subscriptionService.updateStatusByPaddleSubscriptionId(paddleSubscriptionId, body.get("status"));
+        return ResponseEntity.ok().build();
     }
 }

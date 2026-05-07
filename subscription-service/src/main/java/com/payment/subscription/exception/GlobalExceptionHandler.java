@@ -49,6 +49,13 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse("INSUFFICIENT_TOKENS", ex.getMessage(), LocalDateTime.now()));
     }
 
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<ErrorResponse> handleRateLimit(RateLimitExceededException ex) {
+        log.warn("Rate limit exceeded: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(new ErrorResponse("RATE_LIMIT_EXCEEDED", ex.getMessage(), LocalDateTime.now()));
+    }
+
     @ExceptionHandler(PaymentException.class)
     public ResponseEntity<ErrorResponse> handlePayment(PaymentException ex) {
         log.error("Payment error: {}", ex.getMessage(), ex);

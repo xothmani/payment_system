@@ -46,6 +46,9 @@ public class Subscription {
     private String paymentProfileId;
     private String paddleSubscriptionId;
 
+    @Column(name = "paddle_checkout_url", length = 1024)
+    private String paddleCheckoutUrl;
+
     @Column(nullable = false)
     private String country;
 

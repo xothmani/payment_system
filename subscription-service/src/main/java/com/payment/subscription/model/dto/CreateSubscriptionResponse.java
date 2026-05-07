@@ -9,6 +9,7 @@ public record CreateSubscriptionResponse(
         UUID subscriptionId,
         SubscriptionStatus status,
         LocalDateTime trialEndsAt,
-        long tokenBalance
+        long tokenBalance,
+        String checkoutUrl
 ) {
 }
