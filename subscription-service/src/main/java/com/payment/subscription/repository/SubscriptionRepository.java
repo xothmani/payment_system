@@ -3,6 +3,8 @@ package com.payment.subscription.repository;
 import com.payment.subscription.model.Subscription;
 import com.payment.subscription.model.SubscriptionStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
@@ -18,4 +20,7 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
     List<Subscription> findByStatusAndTrialEndsAtLessThanEqual(SubscriptionStatus status, LocalDateTime date);
 
     Optional<Subscription> findByPaddleSubscriptionId(String paddleSubscriptionId);
+
+    @Query("SELECT s FROM Subscription s WHERE s.paddleSubscriptionId = :id OR s.paddleCheckoutUrl LIKE CONCAT('%', :id, '%')")
+    Optional<Subscription> findByPaddleId(@Param("id") String id);
 }

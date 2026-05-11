@@ -68,8 +68,13 @@ public class CustomerProfileService {
             paymentProfile.setCustomerType(CustomerTypeEnum.INDIVIDUAL);
             paymentProfile.setPayment(paymentType);
 
+            String merchantId = "U_" + userId;
+            if (merchantId.length() > 20) {
+                merchantId = merchantId.substring(0, 20);
+            }
+
             CustomerProfileType customerProfile = new CustomerProfileType();
-            customerProfile.setMerchantCustomerId("M_" + email);
+            customerProfile.setMerchantCustomerId(merchantId);
             customerProfile.setDescription("Profile for " + email);
             customerProfile.setEmail(email);
             customerProfile.getPaymentProfiles().add(paymentProfile);

@@ -151,6 +151,33 @@ public class SubscriptionService {
                 subscription.getPaddleCheckoutUrl());
     }
 
+    @Transactional(readOnly = true)
+    public SubscriptionResponse getSubscriptionByOrganizationId(UUID organizationId) {
+        Subscription subscription = subscriptionRepository.findByUserId(organizationId)
+                .orElseThrow(() -> new SubscriptionNotFoundException(organizationId));
+
+        LocalDateTime now = LocalDateTime.now();
+        long daysRemaining = 0;
+        if (subscription.getStatus() == SubscriptionStatus.TRIAL && subscription.getTrialEndsAt() != null) {
+            daysRemaining = ChronoUnit.DAYS.between(now, subscription.getTrialEndsAt());
+        } else if (subscription.getCurrentPeriodEnd() != null) {
+            daysRemaining = ChronoUnit.DAYS.between(now, subscription.getCurrentPeriodEnd());
+        }
+
+        long tokenBalance = getTokenBalance(subscription.getUserId());
+
+        return new SubscriptionResponse(
+                subscription.getId(),
+                subscription.getStatus(),
+                subscription.getPlan().getCode(),
+                subscription.getBillingInterval(),
+                subscription.getTrialEndsAt(),
+                subscription.getCurrentPeriodEnd(),
+                daysRemaining,
+                tokenBalance,
+                subscription.getPaddleCheckoutUrl());
+    }
+
     @Transactional
     public CancelSubscriptionResponse cancelSubscription(UUID subscriptionId) {
         Subscription subscription = subscriptionRepository.findById(subscriptionId)
@@ -180,6 +207,32 @@ public class SubscriptionService {
                 subscription.getCancelledAt());
     }
 
+    @Transactional
+    public void activatePaddleSubscriptionByUserId(UUID userId, String status, String paddleSubscriptionId) {
+        Subscription subscription = subscriptionRepository.findByUserId(userId)
+                .orElseThrow(() -> new SubscriptionNotFoundException(userId));
+
+        SubscriptionStatus newStatus;
+        try {
+            newStatus = SubscriptionStatus.valueOf(status.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Unknown subscription status: " + status);
+        }
+
+        subscription.setStatus(newStatus);
+        if (paddleSubscriptionId != null && !paddleSubscriptionId.isBlank()) {
+            subscription.setPaddleSubscriptionId(paddleSubscriptionId);
+        }
+        if (newStatus == SubscriptionStatus.ACTIVE) {
+            LocalDateTime now = LocalDateTime.now();
+            subscription.setCurrentPeriodStart(now);
+            subscription.setCurrentPeriodEnd(now.plusDays(30));
+        }
+        subscriptionRepository.save(subscription);
+        log.info("Subscription {} activated via Paddle webhook for userId={} paddleSub={}",
+                subscription.getId(), userId, paddleSubscriptionId);
+    }
+
     public TokenDeductionResponse deductTokens(UUID userId, long amount, String description) {
         String tokenKey = RedisKeys.tokenBalance(userId.toString());
         Long newBalance;
@@ -201,8 +254,8 @@ public class SubscriptionService {
     }
 
     @Transactional
-    public void updateStatusByPaddleSubscriptionId(String paddleSubscriptionId, String status) {
-        Subscription subscription = subscriptionRepository.findByPaddleSubscriptionId(paddleSubscriptionId)
+    public void updateStatusByPaddleSubscriptionId(String paddleId, String status, String newPaddleSubscriptionId) {
+        Subscription subscription = subscriptionRepository.findByPaddleId(paddleId)
                 .orElseThrow(() -> new SubscriptionNotFoundException(
                         UUID.fromString("00000000-0000-0000-0000-000000000000")));
 
@@ -214,6 +267,12 @@ public class SubscriptionService {
         }
 
         subscription.setStatus(newStatus);
+
+        // Migrate paddleSubscriptionId from txn_xxx to sub_xxx when webhook provides it
+        if (newPaddleSubscriptionId != null && !newPaddleSubscriptionId.isBlank()) {
+            subscription.setPaddleSubscriptionId(newPaddleSubscriptionId);
+        }
+
         if (newStatus == SubscriptionStatus.ACTIVE) {
             LocalDateTime now = LocalDateTime.now();
             subscription.setCurrentPeriodStart(now);
@@ -222,7 +281,7 @@ public class SubscriptionService {
             subscription.setCancelledAt(LocalDateTime.now());
         }
         subscriptionRepository.save(subscription);
-        log.info("Subscription {} (paddle={}) status updated to {}", subscription.getId(), paddleSubscriptionId, newStatus);
+        log.info("Subscription {} (paddle={}) status updated to {}", subscription.getId(), paddleId, newStatus);
     }
 
     private long getTokenBalance(UUID userId) {

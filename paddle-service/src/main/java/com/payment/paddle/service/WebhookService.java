@@ -6,8 +6,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Service
@@ -30,21 +32,29 @@ public class WebhookService {
             String eventType = event.getEventType();
             switch (eventType) {
                 case "subscription.activated" -> {
-                    String paddleSubId = extractPaddleSubscriptionId(event);
-                    if (paddleSubId != null) {
-                        updateSubscriptionStatus(paddleSubId, "ACTIVE");
-                        log.info("Paddle webhook: subscription activated paddleSubId={}", paddleSubId);
+                    if (event.getData() == null) break;
+                    String subId = extractField(event, "id");            // sub_xxx
+                    String userId = extractCustomDataField(event, "userId");
+                    if (subId == null) break;
+
+                    // Try finding by sub_xxx — also stores sub_xxx as canonical ID (idempotent)
+                    boolean updated = tryUpdateStatus(subId, "ACTIVE", subId);
+                    if (!updated && userId != null) {
+                        // Fallback: find subscription by userId and wire up the sub_xxx
+                        updated = tryActivateByUserId(userId, "ACTIVE", subId);
                     }
+                    log.info("Paddle webhook: subscription activated subId={} userId={} updated={}",
+                            subId, userId, updated);
                 }
                 case "subscription.canceled" -> {
-                    String paddleSubId = extractPaddleSubscriptionId(event);
+                    String paddleSubId = extractField(event, "id");
                     if (paddleSubId != null) {
                         updateSubscriptionStatus(paddleSubId, "CANCELLED");
                         log.info("Paddle webhook: subscription cancelled paddleSubId={}", paddleSubId);
                     }
                 }
                 case "transaction.payment_failed" -> {
-                    String paddleSubId = extractPaddleSubscriptionId(event);
+                    String paddleSubId = extractField(event, "id");
                     if (paddleSubId != null) {
                         updateSubscriptionStatus(paddleSubId, "PAST_DUE");
                         log.warn("Paddle webhook: payment failed paddleSubId={}", paddleSubId);
@@ -62,22 +72,71 @@ public class WebhookService {
         }
     }
 
-    private String extractPaddleSubscriptionId(PaddleWebhookEvent event) {
+    private String extractField(PaddleWebhookEvent event, String fieldName) {
         if (event.getData() == null) return null;
-        Object id = event.getData().get("id");
-        return id != null ? id.toString() : null;
+        Object value = event.getData().get(fieldName);
+        return value != null ? value.toString() : null;
     }
 
-    private void updateSubscriptionStatus(String paddleSubId, String status) {
+    private String extractCustomDataField(PaddleWebhookEvent event, String fieldName) {
+        if (event.getData() == null) return null;
+        Object customDataObj = event.getData().get("custom_data");
+        if (!(customDataObj instanceof Map)) return null;
+        Object value = ((Map<?, ?>) customDataObj).get(fieldName);
+        return value != null ? value.toString() : null;
+    }
+
+    private void updateSubscriptionStatus(String paddleId, String status) {
+        tryUpdateStatus(paddleId, status, null);
+    }
+
+    private boolean tryUpdateStatus(String paddleId, String status, String newPaddleSubscriptionId) {
         try {
+            Map<String, String> body = new LinkedHashMap<>();
+            body.put("status", status);
+            if (newPaddleSubscriptionId != null) {
+                body.put("paddleSubscriptionId", newPaddleSubscriptionId);
+            }
             subscriptionServiceRestClient.put()
-                    .uri("/subscriptions/paddle/{paddleSubscriptionId}/status", paddleSubId)
-                    .body(Map.of("status", status))
+                    .uri("/subscriptions/paddle/{id}/status", paddleId)
+                    .body(body)
                     .retrieve()
                     .toBodilessEntity();
+            return true;
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return false;
+            }
+            log.error("HTTP error updating subscription paddleId={} status={}: {}",
+                    paddleId, status, e.getMessage(), e);
+            return false;
         } catch (Exception e) {
-            log.error("Failed to update subscription status for paddleSubId={} status={}: {}",
-                    paddleSubId, status, e.getMessage(), e);
+            log.error("Failed to update subscription status for paddleId={} status={}: {}",
+                    paddleId, status, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    private boolean tryActivateByUserId(String userId, String status, String paddleSubscriptionId) {
+        try {
+            Map<String, String> body = new LinkedHashMap<>();
+            body.put("status", status);
+            body.put("paddleSubscriptionId", paddleSubscriptionId);
+            subscriptionServiceRestClient.put()
+                    .uri("/subscriptions/user/{userId}/paddle-activate", userId)
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity();
+            return true;
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return false;
+            }
+            log.error("HTTP error activating by userId={}: {}", userId, e.getMessage(), e);
+            return false;
+        } catch (Exception e) {
+            log.error("Failed to activate subscription by userId={}: {}", userId, e.getMessage(), e);
+            return false;
         }
     }
 }

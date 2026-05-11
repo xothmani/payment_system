@@ -40,16 +40,30 @@ public class SubscriptionController {
         return subscriptionService.getSubscription(id);
     }
 
+    @GetMapping("/organization/{organizationId}")
+    public SubscriptionResponse getSubscriptionByOrganizationId(@PathVariable UUID organizationId) {
+        return subscriptionService.getSubscriptionByOrganizationId(organizationId);
+    }
+
     @DeleteMapping("/{id}")
     public CancelSubscriptionResponse cancelSubscription(@PathVariable UUID id) {
         return subscriptionService.cancelSubscription(id);
+    }
+
+    @PutMapping("/user/{userId}/paddle-activate")
+    public ResponseEntity<Void> paddleActivateByUserId(
+            @PathVariable UUID userId,
+            @RequestBody Map<String, String> body) {
+        subscriptionService.activatePaddleSubscriptionByUserId(
+                userId, body.get("status"), body.get("paddleSubscriptionId"));
+        return ResponseEntity.ok().build();
     }
 
     @PutMapping("/paddle/{paddleSubscriptionId}/status")
     public ResponseEntity<Void> updatePaddleStatus(
             @PathVariable String paddleSubscriptionId,
             @RequestBody Map<String, String> body) {
-        subscriptionService.updateStatusByPaddleSubscriptionId(paddleSubscriptionId, body.get("status"));
+        subscriptionService.updateStatusByPaddleSubscriptionId(paddleSubscriptionId, body.get("status"), body.get("paddleSubscriptionId"));
         return ResponseEntity.ok().build();
     }
 }
