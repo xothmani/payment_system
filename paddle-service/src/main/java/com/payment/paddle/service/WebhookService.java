@@ -62,8 +62,21 @@ public class WebhookService {
                 }
                 case "subscription.past_due" ->
                         log.warn("Paddle webhook: subscription past due. data={}", event.getData());
-                case "transaction.completed" ->
-                        log.info("Paddle webhook: transaction completed. data={}", event.getData());
+                case "transaction.completed" -> {
+                    if (event.getData() == null) break;
+                    String subscriptionId = extractField(event, "subscription_id");
+                    String userId = extractCustomDataField(event, "userId");
+                    if (subscriptionId != null) {
+                        boolean updated = tryUpdateStatus(subscriptionId, "ACTIVE", subscriptionId);
+                        if (!updated && userId != null) {
+                            updated = tryActivateByUserId(userId, "ACTIVE", subscriptionId);
+                        }
+                        log.info("Paddle webhook: transaction completed - subscription activated: {} updated={}",
+                                subscriptionId, updated);
+                    } else {
+                        log.info("Paddle webhook: transaction completed (no subscription_id). data={}", event.getData());
+                    }
+                }
                 default ->
                         log.debug("Paddle webhook: unhandled event type={}", eventType);
             }
